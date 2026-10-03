@@ -11,7 +11,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        nativeBuildInputs = with pkgs; [ go gopls ];
+        nativeBuildInputs = with pkgs; [ go gopls golangci-lint-langserver golangci-lint ];
         buildInputs = with pkgs; [ ];
       in {
         devShells.default =

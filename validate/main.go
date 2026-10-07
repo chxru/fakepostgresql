@@ -36,4 +36,21 @@ func main() {
 		os.Exit(1)
 	}
 	defer conn.Close(context.Background())
+
+	// simple query
+	_, err = conn.Exec(context.Background(), "select 1")
+	if err != nil {
+		slog.Error("select 1 failed", "error", err)
+	}
+
+	// extended query
+	_, err = conn.Exec(context.Background(),
+		"select $1::int4",
+		pgx.QueryExecModeExec,
+		int32(1),
+	)
+	if err != nil {
+		slog.Error("extended query failed", "error", err)
+	}
+
 }

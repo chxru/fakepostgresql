@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -114,16 +115,13 @@ StartupLoop:
 		}
 	}
 
-	ready := make([]byte, 6)
-	ready[0] = 'Z'
-	binary.BigEndian.PutUint32(ready[1:5], 5)
-	ready[5] = 'I' // I for idle
-
-	if _, err := conn.Write(ready); err != nil {
+	// once the authentication is done, frontend waits till ReadyForQuery
+	err := sendReadyForQuery(conn)
+	if err != nil {
 		slog.Error("Failed to send ReadyForQuery", "error", err)
 		return
 	}
-	slog.Info("ReadyForQuery sent")
+	slog.Info("Initial ReadyForQuery sent")
 
 	for {
 		messageType := make([]byte, 1)
@@ -136,20 +134,87 @@ StartupLoop:
 			continue
 		}
 
-		slog.Debug("Message Type %v", "message", messageType)
+		slog.Debug("Message received", "type", string(messageType))
 
-		length := make([]byte, 4)
-		if _, err := io.ReadFull(reader, length); err != nil {
+		lengthBuf := make([]byte, 4)
+		if _, err := io.ReadFull(reader, lengthBuf); err != nil {
 			slog.Error("Error reading length of the message", "error", err)
 			continue
 		}
+		length := binary.BigEndian.Uint32(lengthBuf) - 4
 
-		messageBuffer := make([]byte, binary.BigEndian.Uint32(length))
+		slog.Debug("Message length", "length", length)
+
+		messageBuffer := make([]byte, length)
 		if _, err := io.ReadFull(reader, messageBuffer); err != nil {
 			slog.Error("Error reading message", "error", err)
 			continue
 		}
 
-		slog.Info(fmt.Sprintf("Received message %v: %s", messageType, string(messageBuffer)))
+		slog.Info(fmt.Sprintf("Received message %s: %s", string(messageType), string(messageBuffer)))
+
+		switch string(messageType) {
+		case "Q":
+			slog.Debug("processing a simple query")
+
+			query, _, err := readCString(messageBuffer)
+			if err != nil {
+				slog.Error("Failed to extract query string from simple query", "error", err)
+				continue
+			}
+
+			slog.Info("Received simple query", "query", query)
+
+		case "P":
+			slog.Debug("processing an extended query")
+
+			destinations, rest, err := readCString(messageBuffer)
+			if err != nil {
+				slog.Error("failed to extract first string for extended message", "error", err)
+				continue
+			}
+
+			if destinations == "" {
+				slog.Debug("unnamed prepared statement")
+			} else {
+				slog.Debug("named prepared statement", "destination", destinations)
+			}
+
+			query, rest, err := readCString(rest)
+			if err != nil {
+				slog.Error("failed to extract second string from extended message", "error", err)
+				continue
+			}
+			slog.Debug("extended query", "query", query)
+
+			dataTypeSpecifiedParams := binary.BigEndian.Uint16(rest[:2])
+
+			slog.Info("Received extended query", "query", query, "params", dataTypeSpecifiedParams)
+		}
+
+		err = sendReadyForQuery(conn)
+		if err != nil {
+			slog.Error("Failed to send ReadyForQuery", "error", err)
+		}
 	}
+}
+
+func sendReadyForQuery(conn net.Conn) error {
+	// https://www.postgresql.org/docs/18/protocol-message-formats.html#PROTOCOL-MESSAGE-FORMATS-READYFORQUERY
+	msgBuf := make([]byte, 6)
+	msgBuf[0] = 'Z'
+	binary.BigEndian.PutUint32(msgBuf[1:5], 5)
+	msgBuf[5] = 'I'
+
+	_, err := conn.Write(msgBuf)
+	return err
+}
+
+func readCString(body []byte) (string, []byte, error) {
+	before, after, ok := bytes.Cut(body, []byte{0})
+	if !ok {
+		return "", nil, fmt.Errorf("missing string terminator")
+	}
+
+	return string(before), after, nil
 }

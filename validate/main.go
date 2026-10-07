@@ -45,7 +45,7 @@ func main() {
 
 	// extended query
 	_, err = conn.Exec(context.Background(),
-		"select $1::int4",
+		"select id, name, city as location from users where id = 4",
 		pgx.QueryExecModeExec,
 		int32(1),
 	)

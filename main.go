@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
+
+	pg_query "github.com/wasilibs/go-pgquery"
 )
 
 const (
@@ -165,6 +167,11 @@ StartupLoop:
 
 			slog.Info("Received simple query", "query", query)
 
+			err = parseQuery(query)
+			if err != nil {
+				slog.Error("failed to parse simple query", "error", err)
+			}
+
 		case "P":
 			slog.Debug("processing an extended query")
 
@@ -190,6 +197,11 @@ StartupLoop:
 			dataTypeSpecifiedParams := binary.BigEndian.Uint16(rest[:2])
 
 			slog.Info("Received extended query", "query", query, "params", dataTypeSpecifiedParams)
+
+			err = parseQuery(query)
+			if err != nil {
+				slog.Error("failed to parse extended query", "error", err)
+			}
 		}
 
 		err = sendReadyForQuery(conn)
@@ -217,4 +229,14 @@ func readCString(body []byte) (string, []byte, error) {
 	}
 
 	return string(before), after, nil
+}
+
+func parseQuery(query string) error {
+	tree, err := pg_query.Parse(query)
+	if err != nil {
+		return err
+	}
+
+	slog.Info(fmt.Sprintf("parsed query: %s", tree.String()))
+	return nil
 }
